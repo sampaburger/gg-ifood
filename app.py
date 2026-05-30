@@ -331,24 +331,31 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         e3.metric("Taxas e Comissões", f"{brl(taxa)} ({pct(pct_taxa)})")
         e4.metric("Total Gasto na Plataforma", f"{brl(total_gasto_plataforma)} ({pct(pct_total_gasto)})")
 
+        st.caption("Distribuição visual sobre o faturamento operacional: a barra inteira representa 100% do faturamento de itens.")
+
+        restante_operacional = max(faturamento_operacional - total_gasto_plataforma, 0)
         grafico_df = pd.DataFrame([
-            {"Categoria": "Promoções Custeadas pela Loja", "Percentual": pct_promocoes * 100},
-            {"Categoria": "Anúncios", "Percentual": pct_anuncios * 100},
-            {"Categoria": "Taxas e Comissões", "Percentual": pct_taxa * 100},
-            {"Categoria": "Total Gasto na Plataforma", "Percentual": pct_total_gasto * 100},
+            {"Base": "Faturamento Operacional", "Categoria": "Promoções", "Valor": promocoes_loja, "Percentual": pct_promocoes * 100},
+            {"Base": "Faturamento Operacional", "Categoria": "Anúncios", "Valor": anuncios, "Percentual": pct_anuncios * 100},
+            {"Base": "Faturamento Operacional", "Categoria": "Taxas e Comissões", "Valor": taxa, "Percentual": pct_taxa * 100},
+            {"Base": "Faturamento Operacional", "Categoria": "Restante", "Valor": restante_operacional, "Percentual": (restante_operacional / faturamento_operacional * 100) if faturamento_operacional else 0},
         ])
+
         chart = (
             alt.Chart(grafico_df)
-            .mark_bar(cornerRadius=6)
+            .mark_bar(size=44, cornerRadius=8)
             .encode(
-                x=alt.X("Percentual:Q", title="% sobre faturamento operacional"),
-                y=alt.Y("Categoria:N", sort="-x", title=None),
+                x=alt.X("Percentual:Q", stack="normalize", title="100% do faturamento operacional", axis=alt.Axis(format="%")),
+                y=alt.Y("Base:N", title=None, axis=alt.Axis(labels=False, ticks=False)),
+                color=alt.Color("Categoria:N", title=None),
+                order=alt.Order("Categoria:N", sort="ascending"),
                 tooltip=[
                     alt.Tooltip("Categoria:N", title="Indicador"),
-                    alt.Tooltip("Percentual:Q", title="%", format=".2f"),
+                    alt.Tooltip("Valor:Q", title="Valor", format=",.2f"),
+                    alt.Tooltip("Percentual:Q", title="% do faturamento", format=".2f"),
                 ],
             )
-            .properties(height=220)
+            .properties(height=120)
         )
         st.altair_chart(chart, use_container_width=True)
 
