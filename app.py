@@ -6,7 +6,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="iFood Analytics @gianmirante", layout="wide")
+st.set_page_config(page_title="GGK Analytics - iFood", layout="wide")
 
 # -----------------------------
 # Utilitários de formatação
@@ -125,8 +125,10 @@ def extrair_pedidos(uploaded_file):
     recebido_direto = 0.0
     if col_forma and col_total_cliente:
         forma_norm = df_calc[col_forma].map(normalizar)
-        # Regra validada: VR + TICKET, usando Total Pago pelo Cliente, apenas concluídos.
-        mask_direto = forma_norm.str.contains(r"\bvr\b|ticket", regex=True, na=False)
+        # Regra validada: recebimentos diretos pela loja são vales/benefícios
+        # pagos diretamente à loja. Somar Total Pago pelo Cliente apenas dos concluídos.
+        termos_direto = r"ticket|\bvr\b|sodexo|alelo|vale refeicao|vale alimentacao|ifood meal voucher"
+        mask_direto = forma_norm.str.contains(termos_direto, regex=True, na=False)
         recebido_direto = soma_coluna(df_calc[mask_concluido & mask_direto], col_total_cliente)
 
     return {
@@ -199,9 +201,16 @@ def extrair_financeiro(uploaded_file):
     col_valor = achar_coluna(df, ["valor", "valor liquido", "valor líquido", "total"])
     col_desc = achar_coluna(df, ["descrição", "descricao", "lançamento", "lancamento", "tipo", "categoria"])
 
-    # Repasses: venda + cancelamentos, como validado na conciliação.
+    # Repasses: usar a própria coluna do iFood "impacto_no_repasse" quando existir.
+    # Esta regra bate com o painel financeiro oficial do iFood.
     repasse = 0.0
-    if col_fato and col_valor:
+    col_impacto = achar_coluna(df, ["impacto_no_repasse", "impacto no repasse", "impacta repasse"])
+    if col_impacto and col_valor:
+        impacto_norm = df[col_impacto].map(normalizar)
+        mask_repasse = impacto_norm.eq("sim")
+        repasse = soma_coluna(df[mask_repasse], col_valor)
+    elif col_fato and col_valor:
+        # Fallback para exportações antigas sem a coluna impacto_no_repasse.
         fato_norm = df[col_fato].map(normalizar)
         mask_repasse = fato_norm.str.fullmatch("venda|cancelamento total|cancelamento parcial", na=False)
         if mask_repasse.sum() == 0:
@@ -234,7 +243,9 @@ def extrair_financeiro(uploaded_file):
     # Taxas e comissões conforme card do iFood: comissões + taxa de transação.
     # Exclui taxa de entrega, taxa de serviço e parcelamento para não distorcer o painel gerencial.
     mask_taxa_comissao = texto_busca.str.contains("comiss|taxa de transa", regex=True, na=False)
-    taxas_comissoes = valor_series[mask_taxa_comissao].abs().sum()
+    # O card oficial do iFood considera o valor líquido dessas linhas;
+    # por isso usamos abs(soma líquida), e não soma dos absolutos linha a linha.
+    taxas_comissoes = abs(valor_series[mask_taxa_comissao].sum())
 
     return {
         "df": df,
@@ -249,8 +260,8 @@ def extrair_financeiro(uploaded_file):
 # -----------------------------
 # Interface
 # -----------------------------
-st.title("📊 iFood Analytics @gianmirante")
-st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade. Os valores são todos extraídos das planilhas que você carregar. Este portal não substitui as páginas do próprio iFood e as análises são para mero entendimento.")
+st.title("📊 GGK Analytics - Resumo iFood")
+st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade.")
 
 with st.expander("📖 Como utilizar"):
     st.markdown("""
@@ -414,11 +425,11 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
             st.markdown("""
 - **Faturamento Comercial:** relatório de Desempenho / Vendas.
 - **Faturamento Operacional:** valor dos itens do relatório de Pedidos.
-- **Recebido Direto pela Loja:** `Total pago pelo cliente` filtrando `Forma de pagamento` contendo **VR** ou **TICKET**, apenas pedidos concluídos.
-- **Repasse Líquido:** conciliação financeira filtrando `Fato Gerador` = **Venda**, **Cancelamento Total** e **Cancelamento Parcial**.
+- **Recebido Direto pela Loja:** `Total pago pelo cliente` filtrando `Forma de pagamento` contendo **TICKET**, **VR**, **SODEXO**, **ALELO**, **Vale Refeição** ou **Vale Alimentação**, apenas pedidos concluídos.
+- **Repasse Líquido:** conciliação financeira somando os lançamentos onde `impacto_no_repasse` = **SIM**. Se a coluna não existir, usa fallback por `Fato Gerador` = **Venda**, **Cancelamento Total** e **Cancelamento Parcial**.
 - **Promoções Custeadas pela Loja:** promoções financiadas pela loja na conciliação financeira.
 - **Anúncios:** pacote/anúncios iFood na conciliação financeira.
-- **Taxas e Comissões:** comissões + taxa de transação, conforme leitura gerencial do iFood.
+- **Taxas e Comissões:** comissões + taxa de transação, usando soma líquida para bater com o card oficial do iFood.
 - **Total Gasto na Plataforma:** promoções custeadas pela loja + anúncios + taxas e comissões.
 """)
 
