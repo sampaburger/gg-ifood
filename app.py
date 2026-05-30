@@ -125,10 +125,12 @@ def extrair_pedidos(uploaded_file):
     recebido_direto = 0.0
     if col_forma and col_total_cliente:
         forma_norm = df_calc[col_forma].map(normalizar)
-        # Regra validada: recebimentos diretos pela loja são vales/benefícios
-        # pagos diretamente à loja. Somar Total Pago pelo Cliente apenas dos concluídos.
-        termos_direto = r"ticket|\bvr\b|sodexo|alelo|vale refeicao|vale alimentacao|ifood meal voucher"
+        # Recebido direto pela loja: apenas bandeiras externas pagas diretamente à loja.
+        # IMPORTANTE: não considerar "iFood Meal Voucher" nem outros vouchers do próprio iFood,
+        # porque esses entram no repasse do iFood e inflam o recebido direto.
+        termos_direto = r"sodexo|ticket|\bvr\b|alelo"
         mask_direto = forma_norm.str.contains(termos_direto, regex=True, na=False)
+        mask_direto = mask_direto & ~forma_norm.str.contains("ifood", regex=False, na=False)
         recebido_direto = soma_coluna(df_calc[mask_concluido & mask_direto], col_total_cliente)
 
     return {
@@ -425,7 +427,7 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
             st.markdown("""
 - **Faturamento Comercial:** relatório de Desempenho / Vendas.
 - **Faturamento Operacional:** valor dos itens do relatório de Pedidos.
-- **Recebido Direto pela Loja:** `Total pago pelo cliente` filtrando `Forma de pagamento` contendo **TICKET**, **VR**, **SODEXO**, **ALELO**, **Vale Refeição** ou **Vale Alimentação**, apenas pedidos concluídos.
+- **Recebido Direto pela Loja:** `Total pago pelo cliente` filtrando `Forma de pagamento` contendo **SODEXO**, **TICKET**, **VR** ou **ALELO**, apenas pedidos concluídos. O sistema exclui vouchers do próprio iFood, como **iFood Meal Voucher**, porque eles entram no repasse do iFood.
 - **Repasse Líquido:** conciliação financeira somando os lançamentos onde `impacto_no_repasse` = **SIM**. Se a coluna não existir, usa fallback por `Fato Gerador` = **Venda**, **Cancelamento Total** e **Cancelamento Parcial**.
 - **Promoções Custeadas pela Loja:** promoções financiadas pela loja na conciliação financeira.
 - **Anúncios:** pacote/anúncios iFood na conciliação financeira.
