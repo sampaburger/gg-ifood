@@ -3,7 +3,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from io import BytesIO
 
-st.set_page_config(page_title="Resumo iFood GGK", page_icon="🍔", layout="wide")
+st.set_page_config(page_title="Leitor de iFood GG", page_icon="🍔", layout="wide")
 
 # =========================
 # Utilidades
@@ -150,14 +150,13 @@ def montar_resumo(pedidos, financeiro):
 # =========================
 # Interface
 # =========================
-st.title("🍔 Resumo iFood - GGK / Sampa Burger")
+st.title("Leitor de iFood GG")
 st.caption("Suba o Relatório de Pedidos e o Extrato/Relatório Financeiro do iFood para gerar o resumo consolidado.")
 
 with st.expander("Como usar", expanded=False):
     st.write("""
-    1. Faça upload do **Relatório de Pedidos iFood**.  
-    2. Faça upload do **Relatório Financeiro / Conciliação iFood**.  
-    3. O sistema calcula o resumo usando o **faturamento de itens** como faturamento bruto operacional.
+    1. Faça upload do **Relatório de Pedidos iFood**. Entre no portal do iFood - Menu - Pedidos - Selecione o Período Desejado - Exportar 
+    2. Faça upload do **Relatório Financeiro / Conciliação iFood**.  Entre no portal do iFood - Financeiro - Selecione o Mês Desejado - Exportar
     """)
 
 col1, col2 = st.columns(2)
