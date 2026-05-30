@@ -217,9 +217,18 @@ def extrair_financeiro(uploaded_file):
 
     valor_series = df[col_valor].apply(to_number) if col_valor else pd.Series([0.0] * len(df), index=df.index)
 
-    # Investimento: promoções + anúncios.
-    mask_invest = texto_busca.str.contains("promoc|promo|anuncio|anuncios|pacote de anuncio", regex=True, na=False)
-    investimento = valor_series[mask_invest].abs().sum()
+    # Investimento Comercial: SOMENTE promoções custeadas pela loja + anúncios.
+    # Importante: não incluir promoções custeadas pelo iFood, taxas ou comissões.
+    # Usamos abs(soma líquida) para respeitar estornos/créditos do próprio iFood.
+    mask_promocoes_loja = texto_busca.str.contains(
+        "promocao custeada pela loja|promoção custeada pela loja",
+        regex=True,
+        na=False,
+    )
+    mask_anuncios = texto_busca.str.contains("anuncio|anuncios|pacote de anuncio|pacote de anúncios", regex=True, na=False)
+    promocoes_loja = abs(valor_series[mask_promocoes_loja].sum())
+    anuncios = abs(valor_series[mask_anuncios].sum())
+    investimento = promocoes_loja + anuncios
 
     # Taxas e comissões conforme card do iFood: comissões + taxa de transação.
     # Exclui taxa de entrega, taxa de serviço e parcelamento para não distorcer o painel gerencial.
