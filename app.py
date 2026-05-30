@@ -392,7 +392,7 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         ], columns=["Indicador", "Valor"])
 
         st.divider()
-        st.subheader("Tabela consolidada")
+        st.subheader("Indicadores (KPI'S)")
         tabela_view = resumo.copy()
         tabela_view["Valor"] = tabela_view.apply(
             lambda r: pct(r["Valor"]) if "%" in r["Indicador"] else (f"{int(r['Valor']):,}".replace(",", ".") if r["Indicador"] == "Pedidos" else brl(r["Valor"])),
