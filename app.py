@@ -6,7 +6,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="GGK Analytics - iFood", layout="wide")
+st.set_page_config(page_title="iFood Analytics @gianmirante", layout="wide")
 
 # -----------------------------
 # Utilitários de formatação
@@ -249,8 +249,8 @@ def extrair_financeiro(uploaded_file):
 # -----------------------------
 # Interface
 # -----------------------------
-st.title("📊 GGK Analytics - Resumo iFood")
-st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade.")
+st.title("📊 iFood Analytics @gianmirante")
+st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade. Os valores são todos extraídos das planilhas que você carregar. Este portal não substitui as páginas do próprio iFood e as análises são para mero entendimento.")
 
 with st.expander("📖 Como utilizar"):
     st.markdown("""
