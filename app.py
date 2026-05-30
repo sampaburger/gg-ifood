@@ -2,6 +2,7 @@ import re
 from io import BytesIO
 from typing import List, Optional, Tuple
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -238,8 +239,10 @@ def extrair_financeiro(uploaded_file):
     return {
         "df": df,
         "repasse_liquido": repasse,
-        "investimento_comercial": investimento,
+        "promocoes_loja": promocoes_loja,
+        "anuncios": anuncios,
         "taxas_comissoes": taxas_comissoes,
+        "total_gasto_plataforma": promocoes_loja + anuncios + taxas_comissoes,
     }
 
 
@@ -296,11 +299,15 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         repasse_total = repasse_liquido + recebido_direto
         pct_repasse_total = repasse_total / faturamento_operacional if faturamento_operacional else 0.0
 
-        investimento = financeiro["investimento_comercial"]
-        pct_investimento = investimento / faturamento_operacional if faturamento_operacional else 0.0
-
+        promocoes_loja = financeiro["promocoes_loja"]
+        anuncios = financeiro["anuncios"]
         taxa = financeiro["taxas_comissoes"]
+        total_gasto_plataforma = financeiro["total_gasto_plataforma"]
+
+        pct_promocoes = promocoes_loja / faturamento_operacional if faturamento_operacional else 0.0
+        pct_anuncios = anuncios / faturamento_operacional if faturamento_operacional else 0.0
         pct_taxa = taxa / faturamento_operacional if faturamento_operacional else 0.0
+        pct_total_gasto = total_gasto_plataforma / faturamento_operacional if faturamento_operacional else 0.0
 
         st.divider()
         st.subheader("Resumo principal")
@@ -318,9 +325,32 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         f4.metric("% Repasse Total / Fat. Itens", pct(pct_repasse_total))
 
         st.subheader("Eficiência iFood")
-        e1, e2 = st.columns(2)
-        e1.metric("Investimento Comercial", f"{brl(investimento)} ({pct(pct_investimento)})")
-        e2.metric("Taxas e Comissões", f"{brl(taxa)} ({pct(pct_taxa)})")
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("Promoções Custeadas pela Loja", f"{brl(promocoes_loja)} ({pct(pct_promocoes)})")
+        e2.metric("Anúncios", f"{brl(anuncios)} ({pct(pct_anuncios)})")
+        e3.metric("Taxas e Comissões", f"{brl(taxa)} ({pct(pct_taxa)})")
+        e4.metric("Total Gasto na Plataforma", f"{brl(total_gasto_plataforma)} ({pct(pct_total_gasto)})")
+
+        grafico_df = pd.DataFrame([
+            {"Categoria": "Promoções Custeadas pela Loja", "Percentual": pct_promocoes * 100},
+            {"Categoria": "Anúncios", "Percentual": pct_anuncios * 100},
+            {"Categoria": "Taxas e Comissões", "Percentual": pct_taxa * 100},
+            {"Categoria": "Total Gasto na Plataforma", "Percentual": pct_total_gasto * 100},
+        ])
+        chart = (
+            alt.Chart(grafico_df)
+            .mark_bar(cornerRadius=6)
+            .encode(
+                x=alt.X("Percentual:Q", title="% sobre faturamento operacional"),
+                y=alt.Y("Categoria:N", sort="-x", title=None),
+                tooltip=[
+                    alt.Tooltip("Categoria:N", title="Indicador"),
+                    alt.Tooltip("Percentual:Q", title="%", format=".2f"),
+                ],
+            )
+            .properties(height=220)
+        )
+        st.altair_chart(chart, use_container_width=True)
 
         resumo = pd.DataFrame([
             ["Faturamento Comercial", faturamento_comercial],
@@ -331,10 +361,14 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
             ["Repasse Líquido", repasse_liquido],
             ["Recebido Direto pela Loja", recebido_direto],
             ["% Repasse Total / Fat. Itens", pct_repasse_total],
-            ["Investimento Comercial", investimento],
-            ["% Investimento / Fat. Itens", pct_investimento],
+            ["Promoções Custeadas pela Loja", promocoes_loja],
+            ["% Promoções / Fat. Itens", pct_promocoes],
+            ["Anúncios", anuncios],
+            ["% Anúncios / Fat. Itens", pct_anuncios],
             ["Taxas e Comissões", taxa],
             ["% Taxas e Comissões / Fat. Itens", pct_taxa],
+            ["Total Gasto na Plataforma", total_gasto_plataforma],
+            ["% Total Gasto / Fat. Itens", pct_total_gasto],
         ], columns=["Indicador", "Valor"])
 
         st.divider()
@@ -358,8 +392,10 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
 💳 Recebido Direto pela Loja: {brl(recebido_direto)}
 📊 Repasse Total / Fat. Itens: {pct(pct_repasse_total)}
 
-📢 Investimento Comercial: {brl(investimento)} ({pct(pct_investimento)})
-🏷️ Taxas e Comissões: {brl(taxa)} ({pct(pct_taxa)})"""
+🎯 Promoções Custeadas pela Loja: {brl(promocoes_loja)} ({pct(pct_promocoes)})
+📢 Anúncios: {brl(anuncios)} ({pct(pct_anuncios)})
+🏷️ Taxas e Comissões: {brl(taxa)} ({pct(pct_taxa)})
+📊 Total Gasto na Plataforma: {brl(total_gasto_plataforma)} ({pct(pct_total_gasto)})"""
 
         st.subheader("Resumo para WhatsApp")
         st.text_area("Copiar resumo", whatsapp, height=260)
@@ -373,8 +409,10 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
 - **Faturamento Operacional:** valor dos itens do relatório de Pedidos.
 - **Recebido Direto pela Loja:** `Total pago pelo cliente` filtrando `Forma de pagamento` contendo **VR** ou **TICKET**, apenas pedidos concluídos.
 - **Repasse Líquido:** conciliação financeira filtrando `Fato Gerador` = **Venda**, **Cancelamento Total** e **Cancelamento Parcial**.
-- **Investimento Comercial:** promoções + anúncios.
+- **Promoções Custeadas pela Loja:** promoções financiadas pela loja na conciliação financeira.
+- **Anúncios:** pacote/anúncios iFood na conciliação financeira.
 - **Taxas e Comissões:** comissões + taxa de transação, conforme leitura gerencial do iFood.
+- **Total Gasto na Plataforma:** promoções custeadas pela loja + anúncios + taxas e comissões.
 """)
 
     except Exception as e:
