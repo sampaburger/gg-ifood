@@ -6,7 +6,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="GGK Analytics - iFood", layout="wide")
+st.set_page_config(page_title="Analytics - iFood @gianmirante", layout="wide")
 
 # -----------------------------
 # Utilitários de formatação
@@ -262,8 +262,8 @@ def extrair_financeiro(uploaded_file):
 # -----------------------------
 # Interface
 # -----------------------------
-st.title("📊 GGK Analytics - Resumo iFood")
-st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade.")
+st.title("📊 Analytics - Resumo iFood @gianmirante")
+st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade. Este programa apenas lê as planilhas enviadas e não substitui o portal do iFood")
 
 with st.expander("📖 Como utilizar"):
     st.markdown("""
@@ -330,7 +330,7 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         c3.metric("Pedidos", f"{pedidos_qtd:,}".replace(",", "."))
         c4.metric("Ticket Médio", brl(ticket_medio))
 
-        st.subheader("Financeiro")
+        st.subheader("Financeiro (não inclui taxa de antecipação)")
         f1, f2, f3, f4 = st.columns(4)
         f1.metric("Repasse Líquido Total", brl(repasse_total))
         f2.metric("Repasse Líquido", brl(repasse_liquido))
