@@ -6,7 +6,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Analytics - iFood @gianmirante", layout="wide")
+st.set_page_config(page_title="GGK Analytics - iFood", layout="wide")
 
 # -----------------------------
 # Utilitários de formatação
@@ -259,11 +259,115 @@ def extrair_financeiro(uploaded_file):
     }
 
 
+
+# -----------------------------
+# Extração: performance diária
+# -----------------------------
+def serie_datas_financeiro(valores):
+    """Converte datas do financeiro para data local/operacional.
+
+    Alguns débitos de anúncio do iFood aparecem às 21:00 do dia anterior
+    no export. Somar 3h alinha esses lançamentos com o dia operacional
+    exibido no portal.
+    """
+    dt = pd.to_datetime(valores, errors="coerce")
+    try:
+        dt = dt + pd.Timedelta(hours=3)
+    except Exception:
+        pass
+    return dt.dt.date
+
+
+def extrair_performance_diaria(pedidos_data, financeiro_data):
+    """Retorna DataFrame diário com faturamento operacional, promoções e anúncios."""
+    df_ped = pedidos_data.get("df", pd.DataFrame()).copy()
+    df_fin = financeiro_data.get("df", pd.DataFrame()).copy()
+
+    # ---- Faturamento operacional por dia (Pedidos)
+    col_data_pedido = achar_coluna(df_ped, ["data e hora do pedido", "data do pedido", "data pedido", "data"])
+    col_status = achar_coluna(df_ped, ["status final", "status do pedido", "status"])
+    col_itens = achar_coluna(df_ped, ["valor dos itens", "valor itens", "itens"])
+
+    diario_ped = pd.DataFrame(columns=["Data", "Faturamento Operacional"])
+    if col_data_pedido and col_itens:
+        tmp = df_ped.copy()
+        if col_status:
+            status_norm = tmp[col_status].map(normalizar)
+            mask_concluido = status_norm.str.contains("concluido|concluído|entregue|finalizado", regex=True, na=False)
+            if mask_concluido.sum() == 0:
+                mask_concluido = ~status_norm.str.contains("cancel", regex=True, na=False)
+            tmp = tmp[mask_concluido].copy()
+
+        tmp["Data"] = pd.to_datetime(tmp[col_data_pedido], errors="coerce", dayfirst=True).dt.date
+        tmp["Faturamento Operacional"] = tmp[col_itens].apply(to_number)
+        diario_ped = tmp.dropna(subset=["Data"]).groupby("Data", as_index=False)["Faturamento Operacional"].sum()
+
+    # ---- Promoções e anúncios por dia (Conciliação)
+    col_data_fin = achar_coluna(df_fin, ["data faturamento", "data_faturamento", "data criacao", "data_criacao"])
+    col_data_pedido_fin = achar_coluna(df_fin, ["data_criacao_pedido_associado", "data criacao pedido associado", "data criação pedido associado"])
+    col_desc = achar_coluna(df_fin, ["descrição", "descricao", "descrição lançamento", "descricao_lancamento", "lançamento", "lancamento", "tipo", "categoria"])
+    col_valor = achar_coluna(df_fin, ["valor", "valor liquido", "valor líquido", "total"])
+
+    diario_fin = pd.DataFrame(columns=["Data", "Promoções", "Anúncios"])
+    if col_data_fin and col_desc and col_valor:
+        tmp = df_fin.copy()
+        desc_norm = tmp[col_desc].map(normalizar)
+        valores = tmp[col_valor].apply(to_number)
+
+        mask_promocoes = desc_norm.str.contains("promocao custeada pela loja", regex=False, na=False)
+        mask_anuncios = desc_norm.str.contains("anuncio|pacote de anuncios", regex=True, na=False)
+
+        # Promoções são ligadas ao pedido, então usamos a data do pedido associado quando existir.
+        # Isso evita deslocamento por data de faturamento/repasse.
+        if col_data_pedido_fin:
+            data_promocoes = pd.to_datetime(tmp[col_data_pedido_fin], errors="coerce").dt.date
+            data_promocoes = data_promocoes.fillna(serie_datas_financeiro(tmp[col_data_fin]))
+        else:
+            data_promocoes = serie_datas_financeiro(tmp[col_data_fin])
+
+        promo_tmp = pd.DataFrame({
+            "Data": data_promocoes,
+            "Promoções": valores.where(mask_promocoes, 0),
+        }).dropna(subset=["Data"])
+        promo_diario = promo_tmp.groupby("Data", as_index=False)["Promoções"].sum()
+        promo_diario["Promoções"] = promo_diario["Promoções"].abs()
+
+        # Anúncios não têm pedido associado; usamos data de faturamento ajustada para o dia operacional.
+        anuncios_tmp = pd.DataFrame({
+            "Data": serie_datas_financeiro(tmp[col_data_fin]),
+            "Anúncios": valores.where(mask_anuncios, 0),
+        }).dropna(subset=["Data"])
+        anuncios_diario = anuncios_tmp.groupby("Data", as_index=False)["Anúncios"].sum()
+        anuncios_diario["Anúncios"] = anuncios_diario["Anúncios"].abs()
+
+        diario_fin = promo_diario.merge(anuncios_diario, on="Data", how="outer").fillna(0)
+
+    # ---- Junta as duas fontes e preenche datas faltantes
+    datas = []
+    if not diario_ped.empty:
+        datas += diario_ped["Data"].tolist()
+    if not diario_fin.empty:
+        diario_fin_datas = diario_fin[(diario_fin.get("Promoções", 0) != 0) | (diario_fin.get("Anúncios", 0) != 0)]
+        datas += diario_fin_datas["Data"].tolist()
+    if not datas:
+        return pd.DataFrame(columns=["Data", "Dia", "Faturamento Operacional", "Promoções", "Anúncios"])
+
+    inicio = min(datas)
+    fim = max(datas)
+    base = pd.DataFrame({"Data": pd.date_range(inicio, fim, freq="D").date})
+    out = base.merge(diario_ped, on="Data", how="left").merge(diario_fin, on="Data", how="left")
+    for col in ["Faturamento Operacional", "Promoções", "Anúncios"]:
+        if col not in out.columns:
+            out[col] = 0.0
+        out[col] = out[col].fillna(0.0)
+    out["Dia"] = pd.to_datetime(out["Data"]).dt.strftime("%d/%m")
+    return out
+
 # -----------------------------
 # Interface
 # -----------------------------
-st.title("📊 Analytics - Resumo iFood @gianmirante")
-st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade. Este programa apenas lê as planilhas enviadas e não substitui o portal do iFood")
+st.title("📊 GGK Analytics - Resumo iFood")
+st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade.")
 
 with st.expander("📖 Como utilizar"):
     st.markdown("""
@@ -330,7 +434,7 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         c3.metric("Pedidos", f"{pedidos_qtd:,}".replace(",", "."))
         c4.metric("Ticket Médio", brl(ticket_medio))
 
-        st.subheader("Financeiro (não inclui taxa de antecipação)")
+        st.subheader("Financeiro")
         f1, f2, f3, f4 = st.columns(4)
         f1.metric("Repasse Líquido Total", brl(repasse_total))
         f2.metric("Repasse Líquido", brl(repasse_liquido))
@@ -372,6 +476,62 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         )
         st.altair_chart(chart, use_container_width=True)
 
+        st.divider()
+        st.subheader("Performance Diária")
+        st.caption("Compare, por dia, o faturamento operacional com os investimentos em promoções e anúncios.")
+
+        diario = extrair_performance_diaria(pedidos, financeiro)
+        if not diario.empty:
+            min_data = min(diario["Data"])
+            max_data = max(diario["Data"])
+
+            dcol1, dcol2 = st.columns(2)
+            with dcol1:
+                data_inicio = st.date_input("Data inicial", value=min_data, min_value=min_data, max_value=max_data, format="DD/MM/YYYY")
+            with dcol2:
+                data_fim = st.date_input("Data final", value=max_data, min_value=min_data, max_value=max_data, format="DD/MM/YYYY")
+
+            if data_inicio > data_fim:
+                st.warning("A data inicial não pode ser maior que a data final.")
+            else:
+                diario_filtrado = diario[(diario["Data"] >= data_inicio) & (diario["Data"] <= data_fim)].copy()
+                diario_long = diario_filtrado.melt(
+                    id_vars=["Data", "Dia"],
+                    value_vars=["Faturamento Operacional", "Promoções", "Anúncios"],
+                    var_name="Variável",
+                    value_name="Valor",
+                )
+
+                barras = (
+                    alt.Chart(diario_long)
+                    .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
+                    .encode(
+                        x=alt.X("Dia:N", title="Dia", sort=diario_filtrado["Dia"].tolist()),
+                        xOffset=alt.XOffset("Variável:N"),
+                        y=alt.Y("Valor:Q", title="Valor (R$)"),
+                        color=alt.Color("Variável:N", title=None),
+                        tooltip=[
+                            alt.Tooltip("Dia:N", title="Dia"),
+                            alt.Tooltip("Variável:N", title="Indicador"),
+                            alt.Tooltip("Valor:Q", title="Valor", format=",.2f"),
+                        ],
+                    )
+                    .properties(height=420)
+                )
+                st.altair_chart(barras, use_container_width=True)
+
+                tabela_diaria = diario_filtrado.copy()
+                tabela_diaria["Faturamento Operacional"] = tabela_diaria["Faturamento Operacional"].map(brl)
+                tabela_diaria["Promoções"] = tabela_diaria["Promoções"].map(brl)
+                tabela_diaria["Anúncios"] = tabela_diaria["Anúncios"].map(brl)
+                st.dataframe(
+                    tabela_diaria[["Dia", "Faturamento Operacional", "Promoções", "Anúncios"]],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        else:
+            st.info("Não encontrei dados diários suficientes para montar o gráfico.")
+
         resumo = pd.DataFrame([
             ["Faturamento Comercial", faturamento_comercial],
             ["Faturamento Operacional", faturamento_operacional],
@@ -392,7 +552,7 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         ], columns=["Indicador", "Valor"])
 
         st.divider()
-        st.subheader("Indicadores (KPI'S)")
+        st.subheader("Tabela consolidada")
         tabela_view = resumo.copy()
         tabela_view["Valor"] = tabela_view.apply(
             lambda r: pct(r["Valor"]) if "%" in r["Indicador"] else (f"{int(r['Valor']):,}".replace(",", ".") if r["Indicador"] == "Pedidos" else brl(r["Valor"])),
