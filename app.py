@@ -548,13 +548,9 @@ def extrair_performance_diaria(pedidos_data, financeiro_data):
 st.title("📊 GGK Analytics - Resumo iFood")
 st.caption("Upload dos relatórios iFood para gerar o resumo gerencial da unidade.")
 
-        pdf_bytes = criar_pdf_relatorio(dados_pdf, diario_filtrado_pdf)
-        st.download_button(
-            "Exportar relatório em PDF",
-            data=pdf_bytes,
-            file_name="relatorio_ifood_ggk.pdf",
-            mime="application/pdf",
-        )
+# O botão de exportação fica reservado aqui no topo.
+# Ele será preenchido automaticamente depois que os arquivos forem processados.
+exportar_pdf_topo = st.empty()
 
 with st.expander("📖 Como utilizar"):
     st.markdown("""
@@ -788,6 +784,16 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
             "pct_taxa": pct_taxa,
             "pct_total_gasto": pct_total_gasto,
         }
+        pdf_bytes = criar_pdf_relatorio(dados_pdf, diario_filtrado_pdf)
+        with exportar_pdf_topo.container():
+            st.download_button(
+                "📄 Exportar relatório em PDF",
+                data=pdf_bytes,
+                file_name="relatorio_ifood_ggk.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+            st.caption("Após enviar os 3 arquivos, use este botão para baixar o relatório em PDF.")
 
         csv = resumo.to_csv(index=False, sep=";").encode("utf-8-sig")
         st.download_button("Baixar resumo em CSV", data=csv, file_name="resumo_ifood_ggk.csv", mime="text/csv")
