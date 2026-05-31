@@ -1,14 +1,3 @@
-# GGK Analytics - Resumo iFood
+# GGK Analytics iFood V11
 
-App Streamlit para consolidar relatórios do iFood.
-
-## Arquivos necessários
-- Relatório de Pedidos
-- Financeiro / Conciliação
-- Desempenho / Vendas
-
-## Rodar localmente
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+Inclui exportação em PDF A4 horizontal com layout fixo.

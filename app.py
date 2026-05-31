@@ -6,6 +6,14 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+)
+
 st.set_page_config(page_title="GGK Analytics - iFood", layout="wide")
 
 # -----------------------------
@@ -95,6 +103,177 @@ def soma_coluna(df: pd.DataFrame, col: Optional[str]) -> float:
     if col is None or col not in df.columns:
         return 0.0
     return df[col].apply(to_number).sum()
+
+
+# -----------------------------
+# PDF Export
+# -----------------------------
+def format_percent_num(valor):
+    try:
+        return f"{float(valor) * 100:.2f}%".replace(".", ",")
+    except Exception:
+        return "0,00%"
+
+
+def _pdf_footer(canvas, doc):
+    canvas.saveState()
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#666666"))
+    canvas.drawRightString(landscape(A4)[0] - 1.2 * cm, 0.8 * cm, f"Página {doc.page}")
+    canvas.drawString(1.2 * cm, 0.8 * cm, "GGK Analytics - Relatório iFood")
+    canvas.restoreState()
+
+
+def criar_pdf_relatorio(dados: dict, diario_filtrado: Optional[pd.DataFrame] = None) -> bytes:
+    """Gera PDF A4 horizontal com layout fixo para evitar margens quebradas na impressão."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=1.1 * cm,
+        leftMargin=1.1 * cm,
+        topMargin=1.0 * cm,
+        bottomMargin=1.2 * cm,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "TitleGGK",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#111111"),
+        spaceAfter=8,
+    )
+    h_style = ParagraphStyle(
+        "HeaderGGK",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=15,
+        textColor=colors.HexColor("#111111"),
+        spaceBefore=8,
+        spaceAfter=6,
+    )
+    small_style = ParagraphStyle(
+        "SmallGGK",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#555555"),
+    )
+
+    def section_table(rows, col_widths=None):
+        t = Table(rows, colWidths=col_widths, hAlign="LEFT")
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111111")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D9D9D9")),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FAFAFA")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        return t
+
+    def metric_grid(items):
+        rows = [[Paragraph(f"<b>{titulo}</b><br/>{valor}", small_style) for titulo, valor in items]]
+        t = Table(rows, colWidths=[6.8 * cm] * len(items), hAlign="LEFT")
+        t.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#D9D9D9")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#E6E6E6")),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FAFAFA")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        return t
+
+    story = []
+    story.append(Paragraph("GGK Analytics - Resumo iFood", title_style))
+    periodo_txt = dados.get("periodo", "")
+    if periodo_txt:
+        story.append(Paragraph(periodo_txt, small_style))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph("Resumo principal", h_style))
+    story.append(metric_grid([
+        ("Faturamento Comercial", brl(dados["faturamento_comercial"])),
+        ("Faturamento Operacional", brl(dados["faturamento_operacional"])),
+        ("Pedidos", f"{int(dados['pedidos_qtd']):,}".replace(",", ".")),
+        ("Ticket Médio", brl(dados["ticket_medio"])),
+    ]))
+
+    story.append(Paragraph("Financeiro", h_style))
+    story.append(metric_grid([
+        ("Repasse Líquido Total", brl(dados["repasse_total"])),
+        ("Repasse Líquido", brl(dados["repasse_liquido"])),
+        ("Recebido Direto pela Loja", brl(dados["recebido_direto"])),
+        ("% Repasse Total / Fat. Itens", pct(dados["pct_repasse_total"])),
+    ]))
+
+    story.append(Paragraph("Eficiência iFood", h_style))
+    eficiencia_rows = [
+        ["Indicador", "Valor", "% sobre faturamento operacional"],
+        ["Promoções custeadas pela loja", brl(dados["promocoes_loja"]), pct(dados["pct_promocoes"])],
+        ["Anúncios", brl(dados["anuncios"]), pct(dados["pct_anuncios"])],
+        ["Taxas e comissões", brl(dados["taxa"]), pct(dados["pct_taxa"])],
+        ["Total gasto na plataforma", brl(dados["total_gasto_plataforma"]), pct(dados["pct_total_gasto"])],
+    ]
+    story.append(section_table(eficiencia_rows, [9.5 * cm, 5.0 * cm, 7.0 * cm]))
+    story.append(Spacer(1, 8))
+
+    # Barra 100% empilhada em tabela fixa, compatível com PDF.
+    total = dados["faturamento_operacional"] or 1
+    segmentos = [
+        ("Promoções", dados["promocoes_loja"], colors.HexColor("#D73027")),
+        ("Anúncios", dados["anuncios"], colors.HexColor("#FC8D59")),
+        ("Taxas e comissões", dados["taxa"], colors.HexColor("#91BFDB")),
+        ("Restante", max(dados["faturamento_operacional"] - dados["total_gasto_plataforma"], 0), colors.HexColor("#D9D9D9")),
+    ]
+    bar_cells = []
+    bar_widths = []
+    for nome, valor, cor in segmentos:
+        perc = max(valor / total, 0)
+        if perc <= 0:
+            continue
+        bar_cells.append(Paragraph(f"<b>{nome}</b><br/>{perc*100:.1f}%".replace(".", ","), small_style))
+        bar_widths.append(max(1.2 * cm, 25.0 * cm * perc))
+    bar = Table([bar_cells], colWidths=bar_widths, hAlign="LEFT")
+    bar_style = [("BOX", (0, 0), (-1, -1), 0.4, colors.white), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]
+    for idx, (_, _, cor) in enumerate([seg for seg in segmentos if (seg[1] / total) > 0]):
+        bar_style.append(("BACKGROUND", (idx, 0), (idx, 0), cor))
+        bar_style.append(("TEXTCOLOR", (idx, 0), (idx, 0), colors.black))
+    bar.setStyle(TableStyle(bar_style))
+    story.append(bar)
+
+    if diario_filtrado is not None and not diario_filtrado.empty:
+        story.append(PageBreak())
+        story.append(Paragraph("Performance diária", title_style))
+        story.append(Paragraph("Faturamento operacional, promoções e anúncios por dia no período filtrado.", small_style))
+        story.append(Spacer(1, 6))
+        diario_rows = [["Dia", "Faturamento operacional", "Promoções", "Anúncios"]]
+        for _, row in diario_filtrado.iterrows():
+            diario_rows.append([
+                str(row["Dia"]),
+                brl(row["Faturamento Operacional"]),
+                brl(row["Promoções"]),
+                brl(row["Anúncios"]),
+            ])
+        story.append(section_table(diario_rows, [3.5 * cm, 7.0 * cm, 6.0 * cm, 6.0 * cm]))
+
+    doc.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
 
 
 # -----------------------------
@@ -426,6 +605,8 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
         pct_taxa = taxa / faturamento_operacional if faturamento_operacional else 0.0
         pct_total_gasto = total_gasto_plataforma / faturamento_operacional if faturamento_operacional else 0.0
 
+        diario_filtrado_pdf = pd.DataFrame()
+
         st.divider()
         st.subheader("Resumo principal")
         c1, c2, c3, c4 = st.columns(4)
@@ -495,6 +676,7 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
                 st.warning("A data inicial não pode ser maior que a data final.")
             else:
                 diario_filtrado = diario[(diario["Data"] >= data_inicio) & (diario["Data"] <= data_fim)].copy()
+                diario_filtrado_pdf = diario_filtrado.copy()
                 diario_long = diario_filtrado.melt(
                     id_vars=["Data", "Dia"],
                     value_vars=["Faturamento Operacional", "Promoções", "Anúncios"],
@@ -579,6 +761,32 @@ if arquivo_pedidos and arquivo_financeiro and arquivo_desempenho:
 
         st.subheader("Resumo para WhatsApp")
         st.text_area("Copiar resumo", whatsapp, height=260)
+
+        dados_pdf = {
+            "faturamento_comercial": faturamento_comercial,
+            "faturamento_operacional": faturamento_operacional,
+            "pedidos_qtd": pedidos_qtd,
+            "ticket_medio": ticket_medio,
+            "repasse_total": repasse_total,
+            "repasse_liquido": repasse_liquido,
+            "recebido_direto": recebido_direto,
+            "pct_repasse_total": pct_repasse_total,
+            "promocoes_loja": promocoes_loja,
+            "anuncios": anuncios,
+            "taxa": taxa,
+            "total_gasto_plataforma": total_gasto_plataforma,
+            "pct_promocoes": pct_promocoes,
+            "pct_anuncios": pct_anuncios,
+            "pct_taxa": pct_taxa,
+            "pct_total_gasto": pct_total_gasto,
+        }
+        pdf_bytes = criar_pdf_relatorio(dados_pdf, diario_filtrado_pdf)
+        st.download_button(
+            "Exportar relatório em PDF",
+            data=pdf_bytes,
+            file_name="relatorio_ifood_ggk.pdf",
+            mime="application/pdf",
+        )
 
         csv = resumo.to_csv(index=False, sep=";").encode("utf-8-sig")
         st.download_button("Baixar resumo em CSV", data=csv, file_name="resumo_ifood_ggk.csv", mime="text/csv")
